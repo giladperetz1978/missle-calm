@@ -40,6 +40,8 @@ let lastSeenAlertId = "";
 let audioCtx = null;
 const activeOscillators = new Set();
 let fallbackPollTimer = null;
+let sseSource = null;
+let sseReconnectTimer = null;
 
 const SETTINGS_KEY = "missile-calm-settings-v1";
 const threatKindLabel = {
@@ -347,6 +349,37 @@ function stopFallbackPolling() {
   fallbackPollTimer = null;
 }
 
+function clearSseReconnectTimer() {
+  if (!sseReconnectTimer) {
+    return;
+  }
+  clearTimeout(sseReconnectTimer);
+  sseReconnectTimer = null;
+}
+
+function closeSseConnection() {
+  if (!sseSource) {
+    return;
+  }
+  try {
+    sseSource.close();
+  } catch {
+    // Ignore close errors.
+  }
+  sseSource = null;
+}
+
+function scheduleSseReconnect(reason) {
+  if (sseReconnectTimer) {
+    return;
+  }
+
+  sseReconnectTimer = setTimeout(() => {
+    sseReconnectTimer = null;
+    connectSse(reason || "retry");
+  }, 1200);
+}
+
 function speakAlert(type, fallbackMessage, spokenMessage) {
   const message = spokenMessage || spokenByType[type] || fallbackMessage;
   if (!("speechSynthesis" in window)) {
@@ -419,11 +452,15 @@ async function handleAlert(alert) {
   updateDebugState(`התקבלה התראה: ${formatType(alert.type)}`);
 }
 
-function connectSse() {
+function connectSse(reason) {
+  clearSseReconnectTimer();
+  closeSseConnection();
+
   updateConnectionState("מחובר...", false);
-  updateDebugState("פותח חיבור זמן אמת...");
+  updateDebugState(reason ? `פותח חיבור זמן אמת מחדש (${reason})...` : "פותח חיבור זמן אמת...");
 
   const source = new EventSource(apiUrl("/api/stream"));
+  sseSource = source;
 
   source.onopen = () => {
     stopFallbackPolling();
@@ -448,7 +485,18 @@ function connectSse() {
   source.onerror = () => {
     updateConnectionState("נותק. ניסיון התחברות מחדש...", true);
     startFallbackPolling();
+    closeSseConnection();
+    scheduleSseReconnect("network");
   };
+}
+
+function reconnectOnResume(trigger) {
+  if (document.visibilityState && document.visibilityState !== "visible") {
+    return;
+  }
+
+  stopFallbackPolling();
+  connectSse(trigger || "resume");
 }
 
 async function registerSw() {
@@ -632,3 +680,16 @@ syncNotificationBtnState();
 registerSw().catch(() => {});
 fetchSourceInfo().catch(() => {});
 connectSse();
+
+window.addEventListener("focus", () => reconnectOnResume("focus"));
+window.addEventListener("online", () => reconnectOnResume("online"));
+window.addEventListener("pageshow", () => reconnectOnResume("pageshow"));
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    reconnectOnResume("visible");
+  }
+});
+window.addEventListener("beforeunload", () => {
+  clearSseReconnectTimer();
+  closeSseConnection();
+});
