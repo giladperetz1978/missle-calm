@@ -185,6 +185,10 @@ function buildSpokenText(alert) {
     return `סיום אירוע: ${ended}. ניתן לצאת מהמרחב המוגן.`;
   }
 
+  if (alert.type === "aircraft") {
+    return "התראה כלי טיס";
+  }
+
   const areaText = Array.isArray(alert.areas) && alert.areas.length
     ? ` באזורים ${alert.areas.join(" ו-")}`
     : "";
@@ -462,19 +466,39 @@ async function registerSw() {
   }
 }
 
+function syncNotificationBtnState() {
+  if (!("Notification" in window)) {
+    enableNotificationsBtn.textContent = "התראות לא נתמכות";
+    enableNotificationsBtn.disabled = true;
+    return;
+  }
+  if (Notification.permission === "granted") {
+    enableNotificationsBtn.textContent = "התראות מאושרות ✓";
+  } else if (Notification.permission === "denied") {
+    enableNotificationsBtn.textContent = "התראות חסומות - פתח הגדרות דפדפן";
+    enableNotificationsBtn.title = "כדי לאפשר: לחץ על מנעול/מידע בשורת הכתובת ← הרשאות אתר ← התראות ← אפשר";
+  }
+}
+
 async function requestNotificationPermission() {
   if (!("Notification" in window)) {
-    alert("הדפדפן לא תומך בהתראות.");
+    updateDebugState("הדפדפן לא תומך בהתראות", true);
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    updateDebugState("התראות חסומות בדפדפן. לחץ על מנעול/מידע בשורת הכתובת → הרשאות אתר → התראות → אפשר", true);
+    syncNotificationBtnState();
     return;
   }
 
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
-    enableNotificationsBtn.textContent = "התראות מאושרות";
     updateDebugState("הרשאת התראות אושרה");
   } else {
     updateDebugState("הרשאת התראות לא אושרה", true);
   }
+  syncNotificationBtnState();
 }
 
 async function unlockAudio() {
@@ -607,6 +631,7 @@ if (saveSettingsBtn) {
 loadSettings();
 syncSettingsUi();
 renderSettingsState("הגדרות נטענו");
+syncNotificationBtnState();
 
 registerSw().catch(() => {});
 fetchSourceInfo().catch(() => {});
