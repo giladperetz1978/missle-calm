@@ -12,5 +12,7 @@ services:
         value: 20
       - key: POLL_INTERVAL_MS
         value: 2500
+      - key: CORS_ORIGIN
+        value: https://giladperetz1978.github.io
       - key: ALERT_SOURCE_URL
         value: https://www.oref.org.il/WarningMessages/alert/alerts.json
