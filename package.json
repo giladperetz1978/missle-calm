@@ -1,0 +1,17 @@
+{
+  "name": "missile-calm",
+  "version": "1.0.0",
+  "description": "PWA real-time Home Front Command alerts with distinct sounds for missile and aircraft",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

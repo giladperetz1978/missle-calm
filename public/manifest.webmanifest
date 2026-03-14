@@ -1,0 +1,21 @@
+{
+  "name": "Missile Calm",
+  "short_name": "MissileCalm",
+  "description": "התרעות פיקוד העורף בזמן אמת עם צלילים שונים לטיל ולכלי טיס",
+  "lang": "he",
+  "dir": "rtl",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#130a0a",
+  "theme_color": "#9b0d0d",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

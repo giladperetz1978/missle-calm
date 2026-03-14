@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: missile-calm
+    runtime: node
+    plan: free
+    autoDeploy: true
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: POLL_INTERVAL_MS
+        value: 2500
+      - key: ALERT_SOURCE_URL
+        value: https://www.oref.org.il/WarningMessages/alert/alerts.json
