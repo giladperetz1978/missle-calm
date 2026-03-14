@@ -1,4 +1,4 @@
-const CACHE_NAME = "missile-calm-v4";
+const CACHE_NAME = "missile-calm-v5";
 const APP_ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./config.js", "./manifest.webmanifest", "./icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -63,6 +63,30 @@ self.addEventListener("message", (event) => {
       badge: "./icons/icon.svg",
       tag: payload.id || "alert",
       data: payload
+    })
+  );
+});
+
+self.addEventListener("push", (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch {
+    payload = {};
+  }
+
+  const data = payload.data || {};
+  const title = payload.title || data.title || "התרעה חדשה";
+  const body = payload.body || data.message || "נכנסה התראה";
+
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body,
+      icon: "./icons/icon.svg",
+      badge: "./icons/icon.svg",
+      tag: payload.tag || data.id || "alert",
+      renotify: true,
+      data
     })
   );
 });

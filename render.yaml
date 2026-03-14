@@ -16,3 +16,9 @@ services:
         value: https://giladperetz1978.github.io
       - key: ALERT_SOURCE_URL
         value: https://www.oref.org.il/WarningMessages/alert/alerts.json
+      - key: VAPID_SUBJECT
+        value: mailto:alerts@example.com
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false

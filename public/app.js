@@ -43,6 +43,19 @@ let fallbackPollTimer = null;
 let sseSource = null;
 let sseReconnectTimer = null;
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const normalized = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(normalized);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+
+  return outputArray;
+}
+
 const SETTINGS_KEY = "missile-calm-settings-v1";
 const threatKindLabel = {
   missile_iran: "טילים מאיראן",
@@ -162,6 +175,58 @@ function saveSettingsFromUi() {
   const watchedAreas = getWatchedAreas();
   const watchSummary = watchedAreas.length ? watchedAreas.join(" | ") : "ללא סינון";
   renderSettingsState(`נשמר. סינון: ${userSettings.filterEnabled ? "פעיל" : "כבוי"} | אזורים: ${watchSummary}`);
+
+  ensurePushSubscription().catch(() => {});
+}
+
+function buildAreaPrefsPayload() {
+  return {
+    filterEnabled: userSettings.filterEnabled,
+    watchedAreas: getWatchedAreas()
+  };
+}
+
+async function ensurePushSubscription() {
+  if (!("PushManager" in window)) {
+    return;
+  }
+
+  if (!("Notification" in window) || Notification.permission !== "granted") {
+    return;
+  }
+
+  if (!serviceWorkerRegistration) {
+    return;
+  }
+
+  const keyResponse = await fetch(apiUrl("/api/push/public-key"));
+  if (!keyResponse.ok) {
+    return;
+  }
+
+  const keyPayload = await keyResponse.json();
+  if (!keyPayload || !keyPayload.enabled || !keyPayload.publicKey) {
+    return;
+  }
+
+  let subscription = await serviceWorkerRegistration.pushManager.getSubscription();
+  if (!subscription) {
+    subscription = await serviceWorkerRegistration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey)
+    });
+  }
+
+  await fetch(apiUrl("/api/push/subscribe"), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      subscription,
+      areaPrefs: buildAreaPrefsPayload()
+    })
+  });
 }
 
 function formatType(type) {
@@ -507,6 +572,7 @@ async function registerSw() {
   serviceWorkerRegistration = await navigator.serviceWorker.register("./sw.js");
   if (serviceWorkerRegistration) {
     serviceWorkerRegistration.update().catch(() => {});
+    ensurePushSubscription().catch(() => {});
   }
 }
 
@@ -539,6 +605,9 @@ async function requestNotificationPermission() {
   const permission = await Notification.requestPermission();
   if (permission === "granted") {
     updateDebugState("הרשאת התראות אושרה");
+    ensurePushSubscription().catch((error) => {
+      updateDebugState(`שגיאת Push: ${error.message || error}`, true);
+    });
   } else {
     updateDebugState("הרשאת התראות לא אושרה", true);
   }

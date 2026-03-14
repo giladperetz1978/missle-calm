@@ -1,5 +1,6 @@
 const express = require("express");
 const path = require("path");
+const webPush = require("web-push");
 
 const app = express();
 
@@ -9,12 +10,21 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
 const ALERT_SOURCE_URL =
   process.env.ALERT_SOURCE_URL ||
   "https://www.oref.org.il/WarningMessages/alert/alerts.json";
+const VAPID_PUBLIC_KEY = process.env.VAPID_PUBLIC_KEY || "";
+const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY || "";
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || "mailto:alerts@example.com";
+const PUSH_ENABLED = Boolean(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 
 const clients = new Set();
+const pushSubscribers = new Map();
 let lastAlertId = "";
 let lastRawFingerprint = "";
 let activeThreat = null;
 let lastBroadcastAlert = null;
+
+if (PUSH_ENABLED) {
+  webPush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+}
 
 const THREAT_KIND_LABEL = {
   missile_iran: "טילים מאיראן",
@@ -178,9 +188,86 @@ function writeSse(res, eventName, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
+function normalizeAreaPrefs(input) {
+  if (!input || typeof input !== "object") {
+    return {
+      filterEnabled: false,
+      watchedAreas: []
+    };
+  }
+
+  const watchedAreas = Array.isArray(input.watchedAreas)
+    ? input.watchedAreas.map((item) => String(item).trim().toLowerCase()).filter(Boolean)
+    : [];
+
+  return {
+    filterEnabled: input.filterEnabled !== false,
+    watchedAreas
+  };
+}
+
+function shouldDeliverByArea(event, areaPrefs) {
+  if (!areaPrefs || !areaPrefs.filterEnabled) {
+    return true;
+  }
+
+  if (!areaPrefs.watchedAreas || !areaPrefs.watchedAreas.length) {
+    return true;
+  }
+
+  const haystack = [
+    ...(Array.isArray(event.areas) ? event.areas : []),
+    event.message || "",
+    event.title || ""
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return areaPrefs.watchedAreas.some((term) => haystack.includes(term));
+}
+
+async function sendPushToSubscribers(event) {
+  if (!PUSH_ENABLED || !event) {
+    return;
+  }
+
+  const payload = {
+    title: event.title || "התרעה",
+    body: event.message || "התקבלה התרעה חדשה",
+    tag: event.id || "alert",
+    data: event
+  };
+
+  const sendTasks = [];
+  for (const [endpoint, entry] of pushSubscribers.entries()) {
+    if (!shouldDeliverByArea(event, entry.areaPrefs)) {
+      continue;
+    }
+
+    sendTasks.push(
+      webPush
+        .sendNotification(entry.subscription, JSON.stringify(payload), {
+          TTL: 60
+        })
+        .catch((error) => {
+          if (error.statusCode === 404 || error.statusCode === 410) {
+            pushSubscribers.delete(endpoint);
+            return;
+          }
+          console.error("Push send error:", error.message || error);
+        })
+    );
+  }
+
+  await Promise.all(sendTasks);
+}
+
 function broadcast(eventName, payload) {
   if (eventName === "alert") {
     lastBroadcastAlert = payload;
+    sendPushToSubscribers(payload).catch((error) => {
+      console.error("Push broadcast error:", error.message || error);
+    });
   }
 
   for (const client of clients) {
@@ -255,7 +342,47 @@ app.get("/health", (_, res) => {
     corsOrigin: CORS_ORIGIN,
     source: ALERT_SOURCE_URL,
     clients: clients.size,
-    activeThreat
+    activeThreat,
+    pushEnabled: PUSH_ENABLED,
+    pushSubscribers: pushSubscribers.size
+  });
+});
+
+app.get("/api/push/public-key", (_, res) => {
+  res.json({
+    enabled: PUSH_ENABLED,
+    publicKey: PUSH_ENABLED ? VAPID_PUBLIC_KEY : null
+  });
+});
+
+app.post("/api/push/subscribe", (req, res) => {
+  if (!PUSH_ENABLED) {
+    res.status(503).json({
+      subscribed: false,
+      reason: "push-disabled"
+    });
+    return;
+  }
+
+  const body = req.body || {};
+  const subscription = body.subscription;
+  if (!subscription || typeof subscription.endpoint !== "string") {
+    res.status(400).json({
+      subscribed: false,
+      reason: "invalid-subscription"
+    });
+    return;
+  }
+
+  pushSubscribers.set(subscription.endpoint, {
+    subscription,
+    areaPrefs: normalizeAreaPrefs(body.areaPrefs),
+    updatedAt: new Date().toISOString()
+  });
+
+  res.json({
+    subscribed: true,
+    subscribers: pushSubscribers.size
   });
 });
 
