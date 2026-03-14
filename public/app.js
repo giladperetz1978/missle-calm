@@ -201,10 +201,6 @@ function shouldHandleAlertByArea(alert) {
     return true;
   }
 
-  if (alert.type === "allclear") {
-    return true;
-  }
-
   const watchedAreas = getWatchedAreas().map((item) => item.toLowerCase());
   if (!watchedAreas.length) {
     return true;
