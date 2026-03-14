@@ -21,10 +21,49 @@
       <section class="controls">
         <button id="enable-notifications" class="btn primary">אשר התראות</button>
         <button id="enable-audio" class="btn">אשר שמע</button>
+        <button id="test-local-sound" class="btn">בדיקת סאונד מקומית</button>
         <button id="test-missile" class="btn ghost">בדיקת טיל</button>
         <button id="test-aircraft" class="btn ghost">בדיקת כלי טיס</button>
         <button id="test-prelaunch" class="btn ghost">בדיקת התראה מוקדמת</button>
         <button id="test-allclear" class="btn ghost">בדיקת סיום אירוע</button>
+      </section>
+
+      <section class="settings-panel">
+        <h2>הגדרות עיר ואזורים</h2>
+        <div class="settings-grid">
+          <label class="field">
+            <span>עיר ראשית</span>
+            <select id="city-select" class="input">
+              <option value="">ללא עיר קבועה</option>
+              <option value="תל אביב">תל אביב</option>
+              <option value="ירושלים">ירושלים</option>
+              <option value="חיפה">חיפה</option>
+              <option value="באר שבע">באר שבע</option>
+              <option value="אשדוד">אשדוד</option>
+              <option value="אשקלון">אשקלון</option>
+              <option value="שדרות">שדרות</option>
+              <option value="נהריה">נהריה</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>אזורים נוספים (פסיק בין ערכים)</span>
+            <input id="areas-input" class="input" type="text" placeholder="לדוגמה: גוש דן, מרכז, השרון" />
+          </label>
+
+          <label class="check-field">
+            <input id="filter-enabled" type="checkbox" checked />
+            <span>הפעל סינון לפי עיר/אזורים</span>
+          </label>
+
+          <label class="check-field">
+            <input id="voice-enabled" type="checkbox" checked />
+            <span>הפעל הקראה קולית</span>
+          </label>
+
+          <button id="save-settings" class="btn">שמור הגדרות</button>
+          <p id="settings-state" class="settings-state">טרם נשמרו הגדרות.</p>
+        </div>
       </section>
 
       <section class="status-grid">

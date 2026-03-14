@@ -9,10 +9,17 @@ const popupAreasEl = document.getElementById("popup-areas");
 
 const enableNotificationsBtn = document.getElementById("enable-notifications");
 const enableAudioBtn = document.getElementById("enable-audio");
+const testLocalSoundBtn = document.getElementById("test-local-sound");
 const testMissileBtn = document.getElementById("test-missile");
 const testAircraftBtn = document.getElementById("test-aircraft");
 const testPrelaunchBtn = document.getElementById("test-prelaunch");
 const testAllclearBtn = document.getElementById("test-allclear");
+const citySelectEl = document.getElementById("city-select");
+const areasInputEl = document.getElementById("areas-input");
+const filterEnabledEl = document.getElementById("filter-enabled");
+const voiceEnabledEl = document.getElementById("voice-enabled");
+const saveSettingsBtn = document.getElementById("save-settings");
+const settingsStateEl = document.getElementById("settings-state");
 
 const configuredApiBase =
   window.APP_CONFIG && typeof window.APP_CONFIG.API_BASE_URL === "string"
@@ -32,6 +39,23 @@ let audioUnlocked = false;
 let lastSeenAlertId = "";
 let audioCtx = null;
 const activeOscillators = new Set();
+let fallbackPollTimer = null;
+
+const SETTINGS_KEY = "missile-calm-settings-v1";
+const threatKindLabel = {
+  missile_iran: "טילים מאיראן",
+  missile_lebanon: "טילים מלבנון",
+  missile_generic: "טילים",
+  aircraft: 'כטב"מ',
+  prelaunch_iran: "התראה מוקדמת מאיראן"
+};
+
+const userSettings = {
+  city: "",
+  extraAreas: [],
+  filterEnabled: true,
+  voiceEnabled: true
+};
 
 const spokenByType = {
   missile: "טילים, נא להתמגן",
@@ -60,6 +84,84 @@ function updateDebugState(text, isError = false) {
   debugStateEl.style.color = isError ? "#ff96a0" : "#9ad9ff";
 }
 
+function splitCsvAreas(value) {
+  if (!value || typeof value !== "string") {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function renderSettingsState(text, isError = false) {
+  if (!settingsStateEl) {
+    return;
+  }
+
+  settingsStateEl.textContent = text;
+  settingsStateEl.style.color = isError ? "#ff96a0" : "#9ad9ff";
+}
+
+function getWatchedAreas() {
+  const result = [];
+  if (userSettings.city) {
+    result.push(userSettings.city);
+  }
+  for (const area of userSettings.extraAreas) {
+    result.push(area);
+  }
+  return result;
+}
+
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    userSettings.city = typeof parsed.city === "string" ? parsed.city : "";
+    userSettings.extraAreas = Array.isArray(parsed.extraAreas)
+      ? parsed.extraAreas.map((item) => String(item).trim()).filter(Boolean)
+      : [];
+    userSettings.filterEnabled = parsed.filterEnabled !== false;
+    userSettings.voiceEnabled = parsed.voiceEnabled !== false;
+  } catch {
+    updateDebugState("הגדרות קיימות לא תקינות, בוצע איפוס", true);
+  }
+}
+
+function syncSettingsUi() {
+  if (citySelectEl) {
+    citySelectEl.value = userSettings.city;
+  }
+  if (areasInputEl) {
+    areasInputEl.value = userSettings.extraAreas.join(", ");
+  }
+  if (filterEnabledEl) {
+    filterEnabledEl.checked = userSettings.filterEnabled;
+  }
+  if (voiceEnabledEl) {
+    voiceEnabledEl.checked = userSettings.voiceEnabled;
+  }
+}
+
+function saveSettingsFromUi() {
+  userSettings.city = citySelectEl ? citySelectEl.value.trim() : "";
+  userSettings.extraAreas = splitCsvAreas(areasInputEl ? areasInputEl.value : "");
+  userSettings.filterEnabled = filterEnabledEl ? filterEnabledEl.checked : true;
+  userSettings.voiceEnabled = voiceEnabledEl ? voiceEnabledEl.checked : true;
+
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(userSettings));
+
+  const watchedAreas = getWatchedAreas();
+  const watchSummary = watchedAreas.length ? watchedAreas.join(" | ") : "ללא סינון";
+  renderSettingsState(`נשמר. סינון: ${userSettings.filterEnabled ? "פעיל" : "כבוי"} | אזורים: ${watchSummary}`);
+}
+
 function formatType(type) {
   if (type === "aircraft") {
     return "כלי טיס";
@@ -71,6 +173,48 @@ function formatType(type) {
     return "סיום אירוע";
   }
   return "טילים";
+}
+
+function buildSpokenText(alert) {
+  if (!alert) {
+    return "התקבלה התרעה";
+  }
+
+  if (alert.type === "allclear") {
+    const ended = alert.endedThreatKind ? threatKindLabel[alert.endedThreatKind] || "אירוע" : "אירוע";
+    return `סיום אירוע: ${ended}. ניתן לצאת מהמרחב המוגן.`;
+  }
+
+  const areaText = Array.isArray(alert.areas) && alert.areas.length
+    ? ` באזורים ${alert.areas.join(" ו-")}`
+    : "";
+  const fallback = spokenByType[alert.type] || alert.message || "התקבלה התרעה";
+  return `סוג ההתרעה: ${formatType(alert.type)}. ${fallback}${areaText}`;
+}
+
+function shouldHandleAlertByArea(alert) {
+  if (!userSettings.filterEnabled) {
+    return true;
+  }
+
+  if (alert.type === "allclear") {
+    return true;
+  }
+
+  const watchedAreas = getWatchedAreas().map((item) => item.toLowerCase());
+  if (!watchedAreas.length) {
+    return true;
+  }
+
+  const haystack = [
+    ...(Array.isArray(alert.areas) ? alert.areas : []),
+    alert.message || "",
+    alert.title || ""
+  ]
+    .join(" ")
+    .toLowerCase();
+
+  return watchedAreas.some((term) => haystack.includes(term));
 }
 
 function popupForAlert(alert) {
@@ -164,12 +308,53 @@ function stopActiveSounds() {
   activeOscillators.clear();
 }
 
-function speakAlert(type, fallbackMessage, spokenMessage) {
-  const message = spokenMessage || spokenByType[type] || fallbackMessage;
-  if (!("speechSynthesis" in window)) {
+function startFallbackPolling() {
+  if (fallbackPollTimer) {
     return;
   }
 
+  updateDebugState("SSE לא זמין, עובר למצב גיבוי (Polling)", true);
+
+  const poll = async () => {
+    try {
+      const response = await fetch(apiUrl("/api/last-alert"));
+      if (!response.ok) {
+        return;
+      }
+
+      const payload = await response.json();
+      if (payload && payload.event) {
+        handleAlert(payload.event);
+      }
+    } catch {
+      updateConnectionState("אין חיבור לשרת כרגע", true);
+    }
+  };
+
+  fallbackPollTimer = setInterval(() => {
+    poll().catch(() => {});
+  }, 6000);
+
+  poll().catch(() => {});
+}
+
+function stopFallbackPolling() {
+  if (!fallbackPollTimer) {
+    return;
+  }
+
+  clearInterval(fallbackPollTimer);
+  fallbackPollTimer = null;
+}
+
+function speakAlert(type, fallbackMessage, spokenMessage) {
+  const message = spokenMessage || spokenByType[type] || fallbackMessage;
+  if (!("speechSynthesis" in window)) {
+    updateDebugState("אין תמיכה בהקראה בדפדפן", true);
+    return;
+  }
+
+  window.speechSynthesis.resume();
   const utter = new SpeechSynthesisUtterance(message);
   utter.lang = "he-IL";
   utter.rate = 0.95;
@@ -202,6 +387,11 @@ async function handleAlert(alert) {
     return;
   }
 
+  if (!shouldHandleAlertByArea(alert)) {
+    updateDebugState("התרעה התקבלה אך סוננה לפי הגדרות אזור");
+    return;
+  }
+
   lastSeenAlertId = alert.id;
   addToFeed(alert);
   popupForAlert(alert);
@@ -211,7 +401,9 @@ async function handleAlert(alert) {
     stopActiveSounds();
   }
 
-  speakAlert(alert.type, alert.message, alert.spokenMessage);
+  if (userSettings.voiceEnabled) {
+    speakAlert(alert.type, alert.message, buildSpokenText(alert));
+  }
 
   if (audioUnlocked && alert.type !== "allclear") {
     playTone(alert.type).catch((error) => {
@@ -234,6 +426,7 @@ function connectSse() {
   const source = new EventSource(apiUrl("/api/stream"));
 
   source.onopen = () => {
+    stopFallbackPolling();
     updateConnectionState("מחובר בזמן אמת", false);
     updateDebugState("SSE מחובר");
   };
@@ -254,7 +447,7 @@ function connectSse() {
 
   source.onerror = () => {
     updateConnectionState("נותק. ניסיון התחברות מחדש...", true);
-    updateDebugState("SSE נותק, מבצע חיבור מחדש", true);
+    startFallbackPolling();
   };
 }
 
@@ -291,14 +484,34 @@ async function unlockAudio() {
 
   try {
     await playTone("missile");
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.resume();
+      const utter = new SpeechSynthesisUtterance("הקראה הופעלה");
+      utter.lang = "he-IL";
+      utter.volume = 0.9;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utter);
+    }
     audioUnlocked = true;
     enableAudioBtn.textContent = "שמע מאושר";
-    updateDebugState("שמע נפתח בהצלחה");
+    updateDebugState("שמע והקראה נפתחו בהצלחה");
   } catch {
     audioUnlocked = false;
     enableAudioBtn.textContent = "שמע נחסם, נסה שוב";
     updateDebugState("הדפדפן חסם שמע, לחץ שוב", true);
   }
+}
+
+async function runLocalSoundTest() {
+  if (!audioUnlocked) {
+    await unlockAudio();
+  }
+
+  await playTone("missile");
+  if (userSettings.voiceEnabled) {
+    speakAlert("missile", "", "בדיקת סאונד מקומית. סוג ההתרעה: טילים.");
+  }
+  updateDebugState("בדיקת סאונד מקומית הושלמה");
 }
 
 async function sendTest(type) {
@@ -323,6 +536,22 @@ async function sendTest(type) {
   }
 }
 
+async function fetchSourceInfo() {
+  try {
+    const response = await fetch(apiUrl("/health"));
+    if (!response.ok) {
+      updateDebugState(`לא ניתן למשוך מקור התרעות מהשרת (${apiUrl("/health")})`, true);
+      return;
+    }
+
+    const payload = await response.json();
+    const source = payload && payload.source ? payload.source : "לא זוהה";
+    updateDebugState(`מקור התרעות: ${source}`);
+  } catch {
+    updateDebugState(`אין גישה לשרת (${API_BASE_URL || "local"})`, true);
+  }
+}
+
 enableNotificationsBtn.addEventListener("click", () => {
   requestNotificationPermission().catch((error) => {
     updateDebugState(`שגיאת התראות: ${error.message || error}`, true);
@@ -334,6 +563,14 @@ enableAudioBtn.addEventListener("click", () => {
     updateDebugState(`שגיאת שמע: ${error.message || error}`, true);
   });
 });
+
+if (testLocalSoundBtn) {
+  testLocalSoundBtn.addEventListener("click", () => {
+    runLocalSoundTest().catch((error) => {
+      updateDebugState(`בדיקת סאונד מקומית נכשלה: ${error.message || error}`, true);
+    });
+  });
+}
 
 testMissileBtn.addEventListener("click", () => {
   sendTest("missile").catch((error) => {
@@ -361,5 +598,16 @@ if (testAllclearBtn) {
   });
 }
 
+if (saveSettingsBtn) {
+  saveSettingsBtn.addEventListener("click", () => {
+    saveSettingsFromUi();
+  });
+}
+
+loadSettings();
+syncSettingsUi();
+renderSettingsState("הגדרות נטענו");
+
 registerSw().catch(() => {});
+fetchSourceInfo().catch(() => {});
 connectSse();

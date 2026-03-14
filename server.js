@@ -14,6 +14,7 @@ const clients = new Set();
 let lastAlertId = "";
 let lastRawFingerprint = "";
 let activeThreat = null;
+let lastBroadcastAlert = null;
 
 const THREAT_KIND_LABEL = {
   missile_iran: "טילים מאיראן",
@@ -178,6 +179,10 @@ function writeSse(res, eventName, data) {
 }
 
 function broadcast(eventName, payload) {
+  if (eventName === "alert") {
+    lastBroadcastAlert = payload;
+  }
+
   for (const client of clients) {
     writeSse(client, eventName, payload);
   }
@@ -266,6 +271,10 @@ app.get("/api/stream", (req, res) => {
   req.on("close", () => {
     clients.delete(res);
   });
+});
+
+app.get("/api/last-alert", (_, res) => {
+  res.json({ event: lastBroadcastAlert });
 });
 
 app.post("/api/test-alert", (req, res) => {
