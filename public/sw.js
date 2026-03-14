@@ -1,4 +1,4 @@
-const CACHE_NAME = "missile-calm-v3";
+const CACHE_NAME = "missile-calm-v4";
 const APP_ASSETS = ["./", "./index.html", "./styles.css", "./app.js", "./config.js", "./manifest.webmanifest", "./icons/icon.svg"];
 
 self.addEventListener("install", (event) => {
@@ -23,6 +23,16 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") {
+    return;
+  }
+
+  const requestUrl = new URL(event.request.url);
+  const isApiRequest = requestUrl.pathname.includes("/api/");
+  const isCrossOrigin = requestUrl.origin !== self.location.origin;
+  const acceptsEventStream = (event.request.headers.get("accept") || "").includes("text/event-stream");
+
+  if (isApiRequest || isCrossOrigin || acceptsEventStream) {
+    event.respondWith(fetch(event.request));
     return;
   }
 
